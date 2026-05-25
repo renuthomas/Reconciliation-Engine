@@ -1,0 +1,7 @@
+node_modules/
+.env
+coverage/
+index.html
+test.MD
+user_transactions.csv
+exchange_transactions.csv
