@@ -129,11 +129,17 @@ class IngestionService {
                 
                 const updateDoc = { ...doc };
                 delete updateDoc._id; // _id is a reserved key
-                // Use an idempotent updateOne upsert operation
+                const {matchingStatus,...rest} = updateDoc;
+                
                 return {
                     updateOne: {
                         filter: { _id: compositeId },
-                        update: { $set: updateDoc },
+                        update: { 
+                            $set: rest,
+                            $setOnInsert:{
+                                matchingStatus,
+                            }
+                         },
                         upsert: true
                     }
                 };
