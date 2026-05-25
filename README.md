@@ -103,7 +103,7 @@ Create a `.env` file in the root directory. Paste the configuration block below 
 
 ```env
 PORT=3000
-MONGODB_URI=mongodb://127.0.0.1:27017/reconciliation_db
+MONGODB_URL=mongodb://127.0.0.1:27017/reconciliation_db
 
 # Core Engine Fallback Defaults
 TIMESTAMP_TOLERANCE_SECONDS=300
