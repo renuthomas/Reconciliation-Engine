@@ -18,6 +18,18 @@ app.use(cors({
 app.use("/api/v1/reconcile", reconcileRouter);
 app.use("/api/v1/report", reportRouter);
 
+app.get("/", (req, res) => { 
+    return res.json("Server is Live"); 
+}); 
+
+// Self-pinging every 14 minutes
+setInterval(() => { 
+    fetch("https://reconciliation-engine-p2dy.onrender.com/")
+        .then(() => console.log("Self-ping successful"))
+        .catch((err) => console.error("Ping failed:", err.message));
+}, 840000);
+
+
 
 app.use((err, req, res, next) => {
     console.error(`[Global Unhandled App Error]:`, err);
