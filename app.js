@@ -10,6 +10,7 @@ import cors from "cors";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set("trust proxy", 1);
 
 const globalRateLimiter=rateLimit({
     windowMs:15*60*1000,
@@ -21,7 +22,7 @@ const globalRateLimiter=rateLimit({
         message:"Too many requests from this IP, please try again after 15 minutes."
     }
 })
-
+app.use(globalRateLimiter);
 app.use(express.json());
 app.use(cors({
     origin:process.env.CORS_ORIGIN || "http://127.0.0.1:3000"
