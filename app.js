@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import {rateLimit} from "express-rate-limit"
 import { reconcileRouter } from "./routes/reconcile.route.js";
 import { reportRouter } from "./routes/report.route.js";
 import { connectDB } from "./config/db.config.js";
@@ -9,6 +10,17 @@ import cors from "cors";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const globalRateLimiter=rateLimit({
+    windowMs:15*60*1000,
+    limit:100,
+    standardHeaders:"draft-7",
+    legacyHeaders:false,
+    message:{
+        success:false,
+        message:"Too many requests from this IP, please try again after 15 minutes."
+    }
+})
 
 app.use(express.json());
 app.use(cors({
