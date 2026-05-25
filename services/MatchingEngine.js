@@ -6,12 +6,13 @@ class MatchingEngine {
   /**
    * Run a memory-safe linear reconciliation algorithm for a specific runId.
    * Time Complexity: O(N + M)
+   * Space Complexity: O(W) where W is the small number of transactions within the sliding time window.
    */
   async reconcile(runId, config) {
     const timestampToleranceMs = config.timestampToleranceSeconds * 1000;
     const quantityTolerancePct = config.quantityTolerancePct;
     const EPSILON = 1e-9; 
-    const BULK_FLUSH_SIZE = 1000; // Prevent bulkDbOps from ballooning memory
+    const BULK_FLUSH_SIZE = 1000; 
 
     // Initialize Cursors sorted by timestamp to allow linear streaming
     const userCursor = Transaction.find({ runId, source: 'USER' }).sort({ timestamp: 1, _id: 1 }).lean().cursor();
@@ -20,9 +21,12 @@ class MatchingEngine {
     const matchedExchangeIds = new Set();
     let bulkDbOps = []; 
 
+    let totalUserCount = 0;
+    let totalExchangeCount = 0;
     let matchedCount = 0;
     let conflictingCount = 0;
     let unmatchedUserCount = 0;
+    let unmatchedExchangeCount = 0;
 
     // Sliding Window Buffer for Exchange records
     const exchangeWindow = [];
@@ -32,12 +36,13 @@ class MatchingEngine {
     const flushBulkOps = async () => {
       if (bulkDbOps.length > 0) {
         await Transaction.bulkWrite(bulkDbOps, { ordered: false });
-        bulkDbOps = []; // Clear reference for GC
+        bulkDbOps = []; 
       }
     };
 
     // Stream USER transactions one by one
     for await (const uTx of userCursor) {
+      totalUserCount++; // Count every user record as it streams past
       if (uTx.isValid === false) continue;
 
       const uTime = uTx.timestamp.getTime();
@@ -45,11 +50,12 @@ class MatchingEngine {
       const uExpectedExchangeType = mapType(uTx.type); 
       const uQty = parseFloat(uTx.quantity.toString());
 
-      // Evict exchange records from the front of the window that have fallen behind the past threshold boundary
+      // A. Evict exchange records from the front of the window that have fallen behind the past threshold boundary
       while (exchangeWindow.length > 0 && uTime - exchangeWindow[0].timestamp.getTime() > timestampToleranceMs) {
         const evictedTx = exchangeWindow.shift();
-        // If it was never matched, flag it as UNMATCHED now since the user timeline has moved past it
+        
         if (!matchedExchangeIds.has(evictedTx._id.toString())) {
+          unmatchedExchangeCount++; // Real-time increment for evicted unmatched records
           bulkDbOps.push({
             updateOne: {
               filter: { _id: evictedTx._id },
@@ -58,23 +64,22 @@ class MatchingEngine {
           });
           if (bulkDbOps.length >= BULK_FLUSH_SIZE) await flushBulkOps();
         } else {
-          matchedExchangeIds.delete(evictedTx._id.toString()); // Keep Set small and clean
+          matchedExchangeIds.delete(evictedTx._id.toString()); 
         }
       }
 
       // B. Pull exchange records from cursor into window until we reach the future threshold boundary
       while (!exchangeCursorExhausted) {
-        // Peek at next or fetch next if lookahead is empty
         const eTx = await exchangeCursor.next();
         if (!eTx) {
           exchangeCursorExhausted = true;
           break;
         }
 
+        totalExchangeCount++; // Inline tracking of total processed Exchange records
         const eTime = eTx.timestamp.getTime();
         exchangeWindow.push(eTx);
 
-        // If this new record is already past our future window, stop pulling for this user tx
         if (eTime - uTime > timestampToleranceMs) {
           break;
         }
@@ -93,9 +98,7 @@ class MatchingEngine {
         
         const eTime = eTx.timestamp.getTime();
 
-        // Break early if window elements drift beyond future threshold boundary
         if (eTime - uTime > timestampToleranceMs) break;
-        // Skip if behind past boundary (though window shifting largely handles this)
         if (uTime - eTime > timestampToleranceMs) continue;
         if (matchedExchangeIds.has(eTx._id.toString())) continue;
 
@@ -135,7 +138,7 @@ class MatchingEngine {
         conflictingCount++;
         this._queueStatusUpdate(bulkDbOps, uTx._id, bestConflict._id, 'CONFLICTING', conflictReason);
       } else {
-        unmatchedUserCount++;
+        unmatchedUserCount++; // Direct execution path monitoring
         bulkDbOps.push({
           updateOne: {
             filter: { _id: uTx._id },
@@ -156,6 +159,7 @@ class MatchingEngine {
     while (exchangeWindow.length > 0) {
       const evictedTx = exchangeWindow.shift();
       if (!matchedExchangeIds.has(evictedTx._id.toString())) {
+        unmatchedExchangeCount++;
         bulkDbOps.push({
           updateOne: {
             filter: { _id: evictedTx._id },
@@ -168,6 +172,8 @@ class MatchingEngine {
     // 4. Handle any remaining items left in the Exchange Cursor
     let remainingETx;
     while ((remainingETx = await exchangeCursor.next())) {
+      totalExchangeCount++; // Continue capturing counts for trailing records
+      unmatchedExchangeCount++;
       bulkDbOps.push({
         updateOne: {
           filter: { _id: remainingETx._id },
@@ -180,11 +186,17 @@ class MatchingEngine {
     // Final database flush
     await flushBulkOps();
 
+    console.log(`[Reconcile Complete] RunId: ${runId}`);
+    console.log(`User Source: Total = ${totalUserCount} | Matched = ${matchedCount} | Conflicting = ${conflictingCount} | Unmatched = ${unmatchedUserCount}`);
+    console.log(`Exchange Source: Total = ${totalExchangeCount} | Matched = ${matchedCount} | Conflicting = ${conflictingCount} | Unmatched = ${unmatchedExchangeCount}`);
+
     return {
+      totalUserCount,
+      totalExchangeCount,
       matchedCount,
       conflictingCount,
       unmatchedUserCount,
-      // Note: Full metric tracking may need a separate count query or an explicit counter increment if required for metadata
+      unmatchedExchangeCount
     };
   }
 
