@@ -2,7 +2,7 @@
   "name": "transaction-reconcillation-engine",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
     "start": "node app.js"
@@ -14,6 +14,7 @@
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "fast-csv": "^5.0.7",
     "mongoose": "^9.6.2"
   },
