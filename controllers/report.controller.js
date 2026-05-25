@@ -1,4 +1,4 @@
-import { ReportService } from "../services/reportService.js";
+import { ReportService } from "../services/ReportService.js";
 import { Run } from "../models/run.model.js";
 import { Transaction } from "../models/transaction.model.js";
 
