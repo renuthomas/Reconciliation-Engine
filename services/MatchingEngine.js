@@ -43,7 +43,12 @@ class MatchingEngine {
     // Stream USER transactions one by one
     for await (const uTx of userCursor) {
       totalUserCount++; // Count every user record as it streams past
-      if (uTx.isValid === false) continue;
+      if (uTx.isValid === false){
+        if(uTx.matchingStatus === 'UNMATCHED'){
+          unmatchedUserCount++;
+        }
+        continue;
+      }
 
       const uTime = uTx.timestamp.getTime();
       const uAsset = normalizeAsset(uTx.asset);
