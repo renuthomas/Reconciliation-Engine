@@ -106,11 +106,11 @@ class MatchingEngine {
           updateOne: {
             filter: { _id: uTx._id },
             update: { 
-              matchingStatus: 'UNMATCHED', 
-              reconciliationReason: (uTx.validationErrors && uTx.validationErrors.length > 0)
-                ? uTx.validationErrors.join(', ') 
-                : 'No matching transaction found within time boundaries on Exchange records' 
+              $set:{
+                matchingStatus: 'UNMATCHED', 
+                reconciliationReason: (uTx.validationErrors && uTx.validationErrors.length > 0) ? uTx.validationErrors.join(', ') : 'No matching transaction found within time boundaries on Exchange records' 
             }
+          }
           }
         });
       }
@@ -123,8 +123,11 @@ class MatchingEngine {
         updateOne: {
           filter: { _id: eTx._id },
           update: { 
-            matchingStatus: 'UNMATCHED', 
-            reconciliationReason: 'No corresponding record logged by User within historical time blocks' 
+            $set:{
+              matchingStatus: 'UNMATCHED', 
+              reconciliationReason: 'No corresponding record logged by User within historical time blocks' 
+              
+            }
           }
         }
       });
@@ -151,13 +154,25 @@ class MatchingEngine {
       {
         updateOne: {
           filter: { _id: userDbId },
-          update: { matchingStatus: status, reconciliationReason: reason, pairedTxId: exchangeDbId }
+          update: { 
+            $set:{
+              matchingStatus: status, 
+              reconciliationReason: reason, 
+              pairedTxId: exchangeDbId
+            }
+          }
         }
       },
       {
         updateOne: {
           filter: { _id: exchangeDbId },
-          update: { matchingStatus: status, reconciliationReason: reason, pairedTxId: userDbId }
+          update: { 
+            $set:{
+              matchingStatus: status,
+              reconciliationReason: reason,
+              pairedTxId: userDbId
+            }
+          }
         }
       }
     );
