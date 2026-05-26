@@ -56,6 +56,8 @@ const startReconcile = async (req, res) => {
             .update(blueprintString)
             .digest('hex');
 
+        console.log("runSignature:", runSignature);
+
         // Atomic Upsert: Re-use the existing runId if the exact same files + configs are run again
         const result = await Run.findOneAndUpdate(
             { runSignature: runSignature },
