@@ -57,7 +57,7 @@ const startReconcile = async (req, res) => {
             .digest('hex');
 
         // Atomic Upsert: Re-use the existing runId if the exact same files + configs are run again
-        const runResult = await Run.findOneAndUpdate(
+        const result = await Run.findOneAndUpdate(
             { runSignature: runSignature },
             {
                 $setOnInsert: {
@@ -66,13 +66,15 @@ const startReconcile = async (req, res) => {
                     runSignature
                 }
             },
-            { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: true,includeResultMetadata:true }
         );
         
+        const runResult = result.value;
+        const isNewRun=!result.lastErrorObject.updatedExisting;
         runId = runResult._id;
 
         // Short-circuit if this exact run combination was already fully processed
-        if (runResult.status === "COMPLETED") {
+        if (!isNewRun && runResult.status === "COMPLETED") {
             return res.status(200).json({
                 success: true,
                 runId,
@@ -80,21 +82,33 @@ const startReconcile = async (req, res) => {
             });
         }
 
-        // Handle resume state changes
-        if (runResult.status === "FAILED") {
-            await Run.findByIdAndUpdate(runId, { status: "PROCESSING", errorMessage: null });
-            console.log(`[Run ${runId}] Resuming crashed run for identical file signatures.`);
-        } else {
-            console.log(`[Run ${runId}] Commencing brand new run based on file fingerprints.`);
-        }
-
-        if(runResult.status==="PROCESSING"){
+        if( !isNewRun && runResult.status==="PROCESSING"){
             return res.status(409).json({
                 success: false,
                 runId,
                 message: "This reconciliation batch is currently being processed by another request. Please poll or check back later."
             });
         }
+
+        // Handle resume state changes
+        if (runResult.status === "FAILED") {
+            await Run.findByIdAndUpdate(
+                {
+                    runId, 
+                    status: "FAILED",
+                },
+                {
+                    $set:{
+                        status: "PROCESSING", 
+                        errorMessage: null 
+                    }
+                }
+            );
+            console.log(`[Run ${runId}] Resuming crashed run for identical file signatures.`);
+        } else {
+            console.log(`[Run ${runId}] Commencing brand new run based on file fingerprints.`);
+        }
+
 
         // Pipeline Execution
         console.log(`[Run ${runId}] Commencing ingestion of user records...`);
