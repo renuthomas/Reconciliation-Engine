@@ -98,7 +98,7 @@ const startReconcile = async (req, res) => {
         if (runResult.status === "FAILED") {
             await Run.findOneAndUpdate(
                 {
-                    runId, 
+                    _id:runId, 
                     status: "FAILED",
                 },
                 {
