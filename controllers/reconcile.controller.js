@@ -88,6 +88,14 @@ const startReconcile = async (req, res) => {
             console.log(`[Run ${runId}] Commencing brand new run based on file fingerprints.`);
         }
 
+        if(runResult.status==="PROCESSING"){
+            return res.status(409).json({
+                success: false,
+                runId,
+                message: "This reconciliation batch is currently being processed by another request. Please poll or check back later."
+            });
+        }
+
         // Pipeline Execution
         console.log(`[Run ${runId}] Commencing ingestion of user records...`);
         await ingestionService.ingestData(userFile, "USER", runId);
