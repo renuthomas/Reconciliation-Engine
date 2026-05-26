@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { Readable } from 'stream';
 
 const RunMock = {
   findOneAndUpdate: jest.fn(),
@@ -8,9 +9,10 @@ const ingestInstance = { ingestData: jest.fn().mockResolvedValue() };
 const matchingInstance = { reconcile: jest.fn().mockResolvedValue({ matchedCount: 0, conflictingCount: 0, unmatchedUserCount: 0, unmatchedExchangeCount: 0 }) };
 const IngestionServiceMock = jest.fn(() => ingestInstance);
 const MatchingEngineMock = jest.fn(() => matchingInstance);
+const createReadStreamMock = jest.fn();
 const StatSyncMock = jest.fn();
 
-jest.unstable_mockModule('fs', () => ({ default: { statSync: StatSyncMock }, statSync: StatSyncMock }));
+jest.unstable_mockModule('fs', () => ({ default: { createReadStream: createReadStreamMock, statSync: StatSyncMock }, createReadStream: createReadStreamMock, statSync: StatSyncMock }));
 jest.unstable_mockModule('../../models/run.model.js', () => ({ Run: RunMock }));
 jest.unstable_mockModule('../../services/IngestionService.js', () => ({
   IngestionService: IngestionServiceMock
@@ -37,10 +39,11 @@ describe('startReconcile controller', () => {
     matchingInstance.reconcile.mockReset().mockResolvedValue({ matchedCount: 0, conflictingCount: 0, unmatchedUserCount: 0, unmatchedExchangeCount: 0 });
     StatSyncMock.mockReset();
     StatSyncMock.mockReturnValue({ size: 100, mtimeMs: 1000 });
+    createReadStreamMock.mockReset().mockImplementation(() => Readable.from(['dummy']));
   });
 
   it('creates a new run and executes the reconciliation pipeline', async () => {
-    RunMock.findOneAndUpdate.mockResolvedValue({ _id: 'run-1', status: 'PROCESSING' });
+    RunMock.findOneAndUpdate.mockResolvedValue({ value: { _id: 'run-1', status: 'PROCESSING' }, lastErrorObject: { updatedExisting: false } });
     req.body = { timestampToleranceSeconds: 120, quantityTolerancePct: 0.5 };
 
     await startReconcile(req, res);
@@ -54,7 +57,7 @@ describe('startReconcile controller', () => {
   });
 
   it('preserves zero tolerance values instead of falling back to defaults', async () => {
-    RunMock.findOneAndUpdate.mockResolvedValue({ _id: 'run-5', status: 'PROCESSING' });
+    RunMock.findOneAndUpdate.mockResolvedValue({ value: { _id: 'run-5', status: 'PROCESSING' }, lastErrorObject: { updatedExisting: false } });
     req.body = { timestampToleranceSeconds: 0, quantityTolerancePct: 0 };
 
     await startReconcile(req, res);
@@ -63,7 +66,7 @@ describe('startReconcile controller', () => {
   });
 
   it('returns immediately for a completed run without reprocessing', async () => {
-    RunMock.findOneAndUpdate.mockResolvedValue({ _id: 'run-2', status: 'COMPLETED' });
+    RunMock.findOneAndUpdate.mockResolvedValue({ value: { _id: 'run-2', status: 'COMPLETED' }, lastErrorObject: { updatedExisting: true } });
 
     await startReconcile(req, res);
 
@@ -75,17 +78,22 @@ describe('startReconcile controller', () => {
   });
 
   it('resumes a failed run by resetting status and continuing processing', async () => {
-    RunMock.findOneAndUpdate.mockResolvedValue({ _id: 'run-3', status: 'FAILED' });
+    RunMock.findOneAndUpdate
+      .mockResolvedValueOnce({ value: { _id: 'run-3', status: 'FAILED' }, lastErrorObject: { updatedExisting: true } })
+      .mockResolvedValueOnce({ value: { _id: 'run-3', status: 'PROCESSING' }, lastErrorObject: { updatedExisting: true } });
 
     await startReconcile(req, res);
 
-    expect(RunMock.findByIdAndUpdate).toHaveBeenCalledWith('run-3', { status: 'PROCESSING', errorMessage: null });
+    expect(RunMock.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'run-3', status: 'FAILED' },
+      { $set: { status: 'PROCESSING', errorMessage: null } }
+    );
     expect(ingestInstance.ingestData).toHaveBeenCalledTimes(2);
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
   it('marks the run as FAILED and returns 500 when ingestion throws', async () => {
-    RunMock.findOneAndUpdate.mockResolvedValue({ _id: 'run-4', status: 'PROCESSING' });
+    RunMock.findOneAndUpdate.mockResolvedValue({ value: { _id: 'run-4', status: 'PROCESSING' }, lastErrorObject: { updatedExisting: false } });
     ingestInstance.ingestData.mockRejectedValue(new Error('ingest failure'));
 
     await startReconcile(req, res);

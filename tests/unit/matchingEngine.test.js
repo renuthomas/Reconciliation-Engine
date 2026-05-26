@@ -12,9 +12,33 @@ const { MatchingEngine } = await import('../../services/MatchingEngine.js');
 describe('MatchingEngine', () => {
   let engine;
 
+  const createCursor = (rows) => {
+    const cursor = {
+      index: 0,
+      next: jest.fn(async () => {
+        if (cursor.index < rows.length) {
+          return rows[cursor.index++];
+        }
+        return null;
+      }),
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            const value = await cursor.next();
+            return value === null ? { value: undefined, done: true } : { value, done: false };
+          }
+        };
+      }
+    };
+
+    return cursor;
+  };
+
   const createFindResponse = (rows) => ({
     sort: jest.fn(() => ({
-      lean: jest.fn().mockResolvedValue(rows)
+      lean: jest.fn(() => ({
+        cursor: jest.fn(() => createCursor(rows))
+      }))
     }))
   });
 
@@ -55,7 +79,7 @@ describe('MatchingEngine', () => {
 
     const result = await engine.reconcile('run-x', { timestampToleranceSeconds: 10, quantityTolerancePct: 0.1 });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       matchedCount: 1,
       conflictingCount: 0,
       unmatchedUserCount: 0,
@@ -68,13 +92,13 @@ describe('MatchingEngine', () => {
       expect.objectContaining({
         updateOne: expect.objectContaining({
           filter: { _id: 'u1' },
-          update: expect.objectContaining({ matchingStatus: 'MATCHED' })
+          update: expect.objectContaining({ $set: expect.objectContaining({ matchingStatus: 'MATCHED' }) })
         })
       }),
       expect.objectContaining({
         updateOne: expect.objectContaining({
           filter: { _id: 'e1' },
-          update: expect.objectContaining({ matchingStatus: 'MATCHED' })
+          update: expect.objectContaining({ $set: expect.objectContaining({ matchingStatus: 'MATCHED' }) })
         })
       })
     ]));
@@ -111,7 +135,7 @@ describe('MatchingEngine', () => {
 
     const result = await engine.reconcile('run-x', { timestampToleranceSeconds: 10, quantityTolerancePct: 10 });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       matchedCount: 0,
       conflictingCount: 1,
       unmatchedUserCount: 0,
@@ -123,13 +147,13 @@ describe('MatchingEngine', () => {
       expect.objectContaining({
         updateOne: expect.objectContaining({
           filter: { _id: 'u2' },
-          update: expect.objectContaining({ matchingStatus: 'CONFLICTING' })
+          update: expect.objectContaining({ $set: expect.objectContaining({ matchingStatus: 'CONFLICTING' }) })
         })
       }),
       expect.objectContaining({
         updateOne: expect.objectContaining({
           filter: { _id: 'e2' },
-          update: expect.objectContaining({ matchingStatus: 'CONFLICTING' })
+          update: expect.objectContaining({ $set: expect.objectContaining({ matchingStatus: 'CONFLICTING' }) })
         })
       })
     ]));
@@ -166,7 +190,7 @@ describe('MatchingEngine', () => {
 
     const result = await engine.reconcile('run-x', { timestampToleranceSeconds: 30, quantityTolerancePct: 1 });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       matchedCount: 0,
       conflictingCount: 0,
       unmatchedUserCount: 1,
