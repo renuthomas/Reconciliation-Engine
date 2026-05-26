@@ -9,14 +9,20 @@ const matchingEngine = new MatchingEngine();
 
 // Generate a unique fingerprint for a file for deterministic run signatures
 function getFileFingerprint(filePath) {
-    try {
-        const stats = fs.statSync(filePath);
-        // Combine name, size in bytes, and last modification time
-        return `${filePath}_${stats.size}_${stats.mtimeMs}`;
-    } catch (error) {
-        console.error(`Failed to read file stats for ${filePath}:`, error);
-        return `${filePath}_MISSING`;
-    }
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const stream = fs.createReadStream(filePath);
+
+        stream.on('data', (data) => hash.update(data));
+
+        stream.on('end', () => {
+            resolve(hash.digest('hex'));
+        });
+
+        stream.on('error', (err) => {
+            reject(err);
+        });
+    });
 }
 
 const parseConfigValue = (input, envValue, defaultValue) => {
@@ -37,23 +43,17 @@ const startReconcile = async (req, res) => {
         };
 
         // Generate unique fingerprints for the files being processed
-        const userFingerprint = getFileFingerprint(userFile);
-        const exchangeFingerprint = getFileFingerprint(exchangeFile);
+        const userFingerprint = await getFileFingerprint(userFile);
+        const exchangeFingerprint = await getFileFingerprint(exchangeFile);
 
-        /*
-            Combine file properties and matching configurations into a single blueprint string
-            We can further optimize this by concatenating the fingerprints into a single string instead of JSON
-        */
-        const blueprintString = JSON.stringify({
-            userFile: userFingerprint,
-            exchangeFile: exchangeFingerprint,
-            tSeconds: config.timestampToleranceSeconds,
-            qPct: config.quantityTolerancePct
-        });
-
+       
         // Hash the string to create a completely deterministic run signature
-        const runSignature = crypto.createHash('sha256')
-            .update(blueprintString)
+        const runSignature = crypto
+            .createHash('sha256')
+            .update(userFingerprint)
+            .update(exchangeFingerprint)
+            .update(String(config.timestampToleranceSeconds))
+            .update(String(config.quantityTolerancePct))
             .digest('hex');
 
         console.log("userFingerprint:", userFingerprint);
@@ -96,7 +96,7 @@ const startReconcile = async (req, res) => {
 
         // Handle resume state changes
         if (runResult.status === "FAILED") {
-            await Run.findByIdAndUpdate(
+            await Run.findOneAndUpdate(
                 {
                     runId, 
                     status: "FAILED",
